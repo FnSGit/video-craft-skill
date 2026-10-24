@@ -61,6 +61,59 @@ FileNotFoundError: [Errno 2] No such file or directory: 'latex'
 **V1 验收用的是 `MANIM_TEX=text`**（本机无 LaTeX，不想为验证装 100MB+）。
 真正做推导片前必须先装 basictex——`MathTex` 的公式质量是推导片的生命线。
 
+### ⚠ basictex 装完还不够——要补两个包（2026-10-24 实测）
+
+basictex 是最小安装，**只装 brew cask 不够**。装完 `latex` 能跑，但 manim 的
+`MathTex` 仍会失败。实测缺失两个东西。检查命令：
+
+```bash
+for p in standalone babel amsmath amssymb dvisvgm; do
+  (kpsewhich $p.sty >/dev/null 2>&1 || kpsewhich $p.cls >/dev/null 2>&1 || which $p >/dev/null 2>&1) \
+    && echo "✅ $p" || echo "❌ $p 缺失"
+done
+```
+
+manim 的 tex template 实际长这样（见 `media/tex/*.tex`）：
+
+```latex
+\documentclass[preview]{standalone}
+\usepackage[english]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+```
+
+basictex 自带 babel / amsmath / amssymb，但缺：
+
+| 缺的 | 干什么用 | 装法 |
+|---|---|---|
+| `standalone.cls` | 裁剪页面到公式墨迹大小 | `sudo tlmgr install standalone` |
+| `dvisvgm` | 把 LaTeX 的 DVI 输出转成 SVG（manim 只吃 SVG） | `sudo tlmgr install dvisvgm` |
+
+一条命令补齐：
+
+```bash
+sudo tlmgr install standalone dvisvgm
+```
+
+> `sudo` 会弹窗要密码，**agent 无法非交互执行**，必须用户在真实终端跑。
+> 这也是 `brew install --cask basictex` 本身要手动跑的原因（pkg 安装器要 sudo）。
+
+### 完整 LaTeX 安装清单（新机器照抄）
+
+```bash
+# 1. basictex（要 sudo，弹窗输密码）
+brew install --cask basictex
+
+# 2. 补 manim 需要的包（要 sudo）
+sudo tlmgr install standalone dvisvgm
+
+# 3. 把 texlive 加进 PATH（basictex 装在 /usr/local/texlive/2026basic）
+echo 'export PATH="/usr/local/texlive/2026basic/bin/universal-darwin:$PATH"' >> ~/.zshrc
+
+# 4. 验证
+kpsewhich standalone.cls && which dvisvgm && which latex
+```
+
 ### 已验证可用的最小渲染
 
 `Text()` mobject + `self.play()` 可以正常出 mp4（`-ql` 低画质）。
