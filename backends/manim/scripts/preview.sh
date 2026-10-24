@@ -12,11 +12,15 @@ A=$((FROM * 30)); B=$((A + SEC * 30 - 1))
 mkdir -p renders
 OUTF="renders/${SLUG}_preview_${FROM}-$((FROM + SEC))s.mp4"
 
-SCENES=$(ls scenes/DP*.py 2>/dev/null | sed 's|scenes/||; s|\.py$||' | sort)
+# zsh 分行拆数组（同 render.sh：$() 不会按换行分词）
+SCENES=(${(f)"$(ls scenes/DP*.py 2>/dev/null | sed 's|scenes/||; s|\.py$||' | sort)"})
 [ -n "$SCENES" ] || { echo "scenes/ 下没有 DP*.py"; exit 1; }
 rm -rf renders/parts_prev && mkdir -p renders/parts_prev
 for S in $SCENES; do
-  .venv/bin/manim render -ql "scenes/$S.py" "$S" --media_dir media >/dev/null 2>&1
+  .venv/bin/manim render -ql "scenes/$S.py" "$S" --media_dir media >/dev/null 2>&1 || {
+    echo "RENDER FAILED: $S"
+    exit 1
+  }
   SRC=$(find media/videos -name "$S.mp4" | head -1)
   [ -n "$SRC" ] && cp "$SRC" "renders/parts_prev/$S.mp4"
 done

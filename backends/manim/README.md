@@ -170,6 +170,38 @@ manim render -s --format=png -qm scenes/DP01.py DP01
 `-s` 会 fast-forward 所有动画存最后一帧。要中间态只能改场景动画时长，
 或先渲片段再 ffmpeg 抽帧。
 
+### ✅ 多 Scene 字幕对齐（V2 已实现）
+
+manim 多 Scene 拼接时，每个 Scene 的 `self.frame` 默认从 1 开始，拼接后
+字幕会按场景内相对帧号查 `timeline.json` → **全片字幕错位**。
+
+V2 已修：
+
+1. `scripts/gen_frame_offsets.py` 从 `分镜表.md` 解析每个 `DPxx` 的帧区间，
+   生成 `.frame_offsets.json`
+2. `common/timed_scene.py` 的 `_apply_frame_offset()` 在渲染时读该文件，
+   设 `self.frame_offset`；`_update_subtitle()` 用 `self.time * FPS + 1 + offset`
+   算全片绝对帧号
+3. `TimedScene.check_frame_budget()` 核对实际帧数与声明区间（差 >2 帧告警）
+
+分镜表格式（两种都认）：
+
+```markdown
+| DP01 | 1-60 |
+| DP02 | 61-120 |
+```
+
+或
+
+```markdown
+## 推导步 DP01
+- 帧区间：1-60
+```
+
+实测验证（2026-10-24）：两场景各 60 帧，timeline 里 S01 在 f1-60、S02 在 f61-120，
+frame_offset 分别为 0 和 60。成片逐帧统计字幕带像素：DP01 时段有字幕、
+DP02 时段字幕从 f101 起出现（FadeIn 32 帧不可见），各自归位无错位。
+
 ### 🔴 字体必须装（否则文字全不可见）
 
 manim 用 Pango 找字体，缺字体会让 `Text()` 渲染成空白：

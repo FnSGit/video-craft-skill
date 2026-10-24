@@ -23,6 +23,10 @@ if [ -d "$CORE" ]; then
   for s in tts_build.py render_storyboard.py motion_check.py frame_metrics.py sheet.py; do
     [ -f "$CORE/$s" ] && cp "$CORE/$s" "$DEST/scripts/"
   done
+  # manim 后端专属：从分镜表生成多 Scene 的 frame_offset（拼接字幕对齐）
+  if [ -f "$HERE/scripts/gen_frame_offsets.py" ]; then
+    cp "$HERE/scripts/gen_frame_offsets.py" "$DEST/scripts/"
+  fi
 else
   echo "⚠ 找不到 core/（$CORE）——中性脚本未复制，请手动拷贝 core/*.py 到 $DEST/scripts/"
 fi

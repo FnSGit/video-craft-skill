@@ -14,13 +14,29 @@ V=${VER:-v1}
 SLUG=$(python3 -c "import json;print(json.load(open('config.json'))['slug'])")
 mkdir -p renders
 
-SCENES=$(ls scenes/DP*.py 2>/dev/null | sed 's|scenes/||; s|\.py$||' | sort)
+# ⚠ zsh 不会像 bash 那样把 "$(cmd)" 按换行分词成多个词——
+#   for S in $SCENES 会拿到单个含 \n 的字符串，导致 manim 收到
+#   'scenes/DP01\nDP02.py' 这种坏路径。用 ${(f)...} 显式按行拆成数组。
+SCENES=(${(f)"$(ls scenes/DP*.py 2>/dev/null | sed 's|scenes/||; s|\.py$||' | sort)"})
 [ -n "$SCENES" ] || { echo "scenes/ 下没有 DP*.py"; exit 1; }
+
+# ---- frame_offset 注入：多 Scene 拼接时字幕对齐的关键 ----
+# 每个 Scene 的 self.frame 原本从 1 开始，拼接后字幕会按场景内相对帧号查
+# timeline.json → 全片字幕错位。这里从分镜表.md 读每个 DPxx 的帧区间，
+# 生成 .frame_offsets.json，由 common/timed_scene.py 在渲染时读取。
+#
+# 分镜表格式（manim 端）：| DP01 | <起始帧>-<结束帧> | ...  或  ## 推导步 DP01  …  帧区间：{S01.from}-{S03.to}
+.venv/bin/python scripts/gen_frame_offsets.py 2>/dev/null || true
 
 rm -rf renders/parts_$V && mkdir -p renders/parts_$V
 for S in $SCENES; do
   echo "render $S ..."
-  .venv/bin/manim render -$Q "scenes/$S.py" "$S" --media_dir media >/dev/null 2>&1
+  # 不吞输出：manim 的报错要能看到（V1 曾被 set -e + >/dev/null 吞掉真实错误）
+  .venv/bin/manim render -$Q "scenes/$S.py" "$S" --media_dir media >/dev/null 2>&1 || {
+    echo "RENDER FAILED: $S —— 重跑一次看详细错误："
+    echo "  .venv/bin/manim render -$Q scenes/$S.py $S --media_dir media"
+    exit 1
+  }
   # manim 输出到 media/videos/<Scene>.mp4（-ql/-qm/-qh 决定子目录）
   SRC=$(find media/videos -name "$S.mp4" | head -1)
   [ -n "$SRC" ] || { echo "RENDER FAILED: $S 没找到输出"; exit 1; }
