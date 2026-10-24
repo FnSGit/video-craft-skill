@@ -6,7 +6,10 @@
 用法：python3 scripts/motion_check.py G3                       → 渲 G3 预览合成该组帧区间，每 3 帧一张、0.5 倍
      python3 scripts/motion_check.py --frames fin_frames        → 对成片逐帧目录（QC 用）
      选项 --shots index   镜头区间改从 src/shots/G*/index.ts 读（分镜表帧号与成片不一致时，如换配音后 retime 的片子；没有分镜表时自动用它）
-          --root <项目根>  默认脚本所在项目
+          --shots DP01:1-170,DP02:171-300   显式区间（manim 等非 remotion 后端用：没有 src/shots，也没有 SCxx 分镜表）
+          --root <项目根>  默认当前工作目录
+          --still-max N    最长静止上限（秒）。remotion 概念片默认 3.0；**manim 推导片用 5.0**（操作后要留时间看清式子）
+          --no-hold        关掉「末拍稳定期」判据——**manim 推导步没有离场概念**，用这个
 注意：组级（低分辨率渲染）读数偏松，成片 fin_frames 复测才是最终判据。
 「无大面积变化」= 320×180 采样灰度平均变化 <1.5（第五片成片实测：落位后只剩动词动作 / 慢推 / 呼吸的尾段 0.4–1.2，入场 / 22 帧滑入 / 33 帧推近 / 整组平移 2.5–15）。
 所以 hold 量的是「版面落定后停了多久」，不是「完全不动了多久」；离场前 6 帧灭光算离场，已从 hold 里扣掉。设计得很大的循环动作（摆动的大字、整框虚线行进）会让 hold 变小，那正是 §7 不许的「为动而动」。"""
@@ -27,6 +30,14 @@ def opt(name, default=None):
     if name in args:
         i = args.index(name); v = args[i + 1]; del args[i:i + 2]; return v
     return default
+
+# 后端适配参数：manim 推导片的节奏判据与 remotion 概念片不同
+#   --still-max N  最长静止上限（秒）。remotion 默认 3.0；manim 推导片用 5.0（要看清式子）
+#   --no-hold      关掉「末拍稳定期」判据——manim 推导步无离场概念，不适用
+_still_max = float(opt('--still-max', STILL_MAX_S))
+_no_hold = '--no-hold' in args
+if _no_hold:
+    args.remove('--no-hold')
 ROOT = os.path.abspath(opt('--root', os.environ.get('VIDEO_CRAFT_ROOT', os.getcwd())))
 shots_src = opt('--shots', 'auto')
 if not args:
@@ -35,13 +46,40 @@ if not args:
 def shots_from_storyboard():
     sb = open(f'{ROOT}/分镜表.md', encoding='utf-8').read()
     return [(m.group(1), int(m.group(2)), int(m.group(3))) for m in re.finditer(r'^\| (SC\d{2,3})[^|]*\| (\d+)–(\d+) \|', sb, re.M)], sb
+def parse_shots_arg(s):
+    """解析 --shots 的显式区间形式：'DP01:1-170,DP02:171-300'。
+
+    manim 等非 remotion 后端没有 src/shots/G*/index.ts，也没有 SCxx 分镜表，
+    用手写区间即可让 core/motion_check.py 跨后端工作。
+    返回 None 表示不是显式区间形式（走原来的 auto/index 逻辑）。
+    """
+    if not s or ',' not in s and ':' not in s:
+        return None
+    out = []
+    for part in s.split(','):
+        part = part.strip()
+        if ':' not in part:
+            return None
+        sid, rng = part.split(':', 1)
+        m = re.match(r'^(\d+)\s*-\s*(\d+)$', rng.strip())
+        if not m:
+            return None
+        out.append((sid.strip(), int(m.group(1)), int(m.group(2))))
+    return out or None
+
+
 def shots_from_index():
     out = []
     for p in sorted(glob.glob(f'{ROOT}/src/shots/G*/index.ts')):
         out += [(m.group(1), int(m.group(2)), int(m.group(3))) for m in re.finditer(r"\{id: '(SC\d+)', from: (\d+), to: (\d+)", open(p, encoding='utf-8').read())]
     return out
+
+
 sb = ''
-if shots_src == 'index' or (shots_src == 'auto' and not os.path.exists(f'{ROOT}/分镜表.md')):
+_explicit = parse_shots_arg(shots_src)
+if _explicit is not None:
+    shots = _explicit
+elif shots_src == 'index' or (shots_src == 'auto' and not os.path.exists(f'{ROOT}/分镜表.md')):
     shots = shots_from_index()
 else:
     shots, sb = shots_from_storyboard()
@@ -90,7 +128,7 @@ fnums = [f for f, _ in frames]
 diffs = {fnums[i + 1]: float(np.abs(small[fnums[i + 1]] - small[fnums[i]]).mean()) for i in range(len(fnums) - 1)}
 
 print(f'{"shot":6s} {"len":>5s} {"still%":>7s} {"longest":>8s} {"hold":>6s}  verdict' + ('   longest-run  fullres-changed-px  class' if FULL else ''))
-print(f'判据：最长静止 ≤{STILL_MAX_S:.0f} s；末拍稳定期 hold ≥{HOLD_MIN} 帧（离场前最后一段无大面积变化的连续帧；带 ~ = 该镜头不离场、承接进下一镜头，只供参考）；still% 只报不判。')
+print(f'判据：最长静止 ≤{_still_max:.0f} s；末拍稳定期 hold ≥{HOLD_MIN} 帧（离场前最后一段无大面积变化的连续帧；带 ~ = 该镜头不离场、承接进下一镜头，只供参考）；still% 只报不判。' + ('【--no-hold：已关掉 hold 判据】' if _no_hold else ''))
 bad = 0
 for sid, a, b in shots:
     fs = [f for f in fnums if a <= f <= b]
@@ -117,15 +155,15 @@ for sid, a, b in shots:
     if exited:
         hold = max(0, hold - GLOW_OFF)
     flags = []
-    if longest > STILL_MAX_S:
-        flags.append(f'✗ still>{STILL_MAX_S:.0f}s')
-    if exited and hold < HOLD_MIN:
+    if longest > _still_max:
+        flags.append(f'✗ still>{_still_max:.0f}s')
+    if not _no_hold and exited and hold < HOLD_MIN:
         flags.append(f'✗ hold<{HOLD_MIN}f')
     verdict = ' '.join(flags) or 'OK'
     if flags:
         bad += 1
     extra = ''
-    if FULL and longest > STILL_MAX_S and best > 0:
+    if FULL and longest > _still_max and best > 0:
         s_ = fs[1:][end - best + 1] - STEP; e_ = fs[1:][end]
         imgs = [load_content(path_of[f]) for f in fs if max(a, s_) <= f <= e_]
         ch = [changed_px(imgs[i], imgs[i + 1]) for i in range(len(imgs) - 1)]

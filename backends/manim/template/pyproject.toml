@@ -1,0 +1,11 @@
+[project]
+name = "video-craft-manim"
+version = "0.1.0"
+description = "video-craft manim backend — 连续公式推导/证明类视频"
+requires-python = ">=3.14"
+dependencies = [
+    "manim>=0.22",
+]
+
+[tool.uv]
+dev-dependencies = []
