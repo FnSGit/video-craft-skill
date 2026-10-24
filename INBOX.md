@@ -33,7 +33,40 @@
 
 ## 🟡 技术债
 
-### 4. basictex 装完仍不够——需补 standalone + dvisvgm（来源：V1 实测，2026-10-24）
+### 4. manim 真公式链路曾全坏：TEXMFROOT/TEXMFCNF 缺失导致公式不可见（来源：V1 实测，2026-10-24，已修）
+
+**现象**：basictex 装完、`latex` 可用、manim 渲染「成功」产出 mp4，但**画面全黑**——
+公式字符一个都不显示。
+
+**排查过程**（三轮才定位，前两轮都误判了）：
+1. 第一轮误判「全黑」：用 `ffmpeg scale=1:1` 单像素采样，黑底主导导致假阴性。
+   **正确检测是 PIL 统计非黑像素数**，不能用 scale=1:1。
+2. 第二轮误判「渲染坏了」：`-s --format=png` 有内容而 mp4 「全黑」，以为是 0.22 的
+   mp4 编码 bug。实际两者内容一致（都 ~355 亮像素），是示例场景本身内容少。
+3. 第三轮定位真因：`warning: kpathsea: configuration file texmf.cnf not found`。
+   `TEXINPUTS` 污染 kpathsea 搜索起点 → dvisvgm 找不到 texmf.cnf → 字体 map 失败
+   → SVG glyph 引用悬空（**use=5 defs=0**）→ 字符不可见。
+
+**修复**：`backends/manim/scripts/env.sh` 显式设 `TEXMFROOT` + `TEXMFCNF`。
+修好后 `use=5 defs=5`，白色公式字符 347–486 像素可见。
+
+**顺带修掉的三个问题**：
+- `manim.cfg` 的 `pixel_width` 不生效（0.22 的 `-q` 标志优先级更高）→ 画幅权威来源改为命令行 `-qm`
+- `still.sh` 用了 `-t` 想指定动画进度，实际 `-t` 是 `--transparent` → 改用 `-s --format=png`
+- 系统缺 Fira Code / Noto Sans SC，`Text()` 渲染空白 → `brew install --cask font-fira-code font-noto-sans-sc`
+
+**沉淀的诊断判据**（一眼判断公式链路是否正常）：
+
+```bash
+F=$(ls media/tex/*.svg | head -1)
+rg -o "xlink:href='#" $F | wc -l    # use 引用数
+rg -o "id='g" $F | wc -l            # defs 定义数
+# 相等 = 字体嵌入成功；defs=0 = 字符全不可见
+```
+
+**优先级**：已修（高——曾阻塞 manim 后端交付）
+
+### 5. basictex 装完仍不够——需补 standalone + preview + dvisvgm（来源：V1 实测，2026-10-24，已修）
 
 `brew install --cask basictex` 装完，`latex` 可用，但 manim 的 `MathTex` 仍失败：
 

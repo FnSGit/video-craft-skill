@@ -6,11 +6,12 @@
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 export PYTHONPATH="$ROOT:${PYTHONPATH:-}"
-export PATH="/opt/homebrew/bin:$PATH"          # manim 需要 pkg-config/cairo/ffmpeg
-[ -n "$PKG_CONFIG_PATH" ] || export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
+source "$ROOT/scripts/env.sh"          # cairo + texlive + TEXMFROOT/TEXMFCNF（见该文件注释）
+# 画幅权威来源：-qm = 1280x720@30fps（manim 0.22 的 -q 会覆盖 manim.cfg）
+Q=${Q:-qm}
+
 V=${VER:-v1}
 SLUG=$(python3 -c "import json;print(json.load(open('config.json'))['slug'])")
-Q=${Q:-qm}                                     # 默认中等画质；终稿用 -qh（--quality high）
 mkdir -p renders
 
 SCENES=$(ls scenes/DP*.py 2>/dev/null | sed 's|scenes/||; s|\.py$||' | sort)

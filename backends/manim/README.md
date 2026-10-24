@@ -61,12 +61,13 @@ FileNotFoundError: [Errno 2] No such file or directory: 'latex'
 **V1 验收用的是 `MANIM_TEX=text`**（本机无 LaTeX，不想为验证装 100MB+）。
 真正做推导片前必须先装 basictex——`MathTex` 的公式质量是推导片的生命线。
 
-### ⚠ basictex 装完还不够——要补两个包（2026-10-24 实测）
+### ⚠ basictex 装完还不够——要补三个包（2026-10-24 实测）
 
 basictex 是最小安装，**只装 brew cask 不够**。装完 `latex` 能跑，但 manim 的
-`MathTex` 仍会失败。实测缺失两个东西。检查命令：
+`MathTex` 仍会失败。实测缺三样：
 
 ```bash
+# 检查缺什么
 for p in standalone babel amsmath amssymb dvisvgm; do
   (kpsewhich $p.sty >/dev/null 2>&1 || kpsewhich $p.cls >/dev/null 2>&1 || which $p >/dev/null 2>&1) \
     && echo "✅ $p" || echo "❌ $p 缺失"
@@ -76,41 +77,131 @@ done
 manim 的 tex template 实际长这样（见 `media/tex/*.tex`）：
 
 ```latex
-\documentclass[preview]{standalone}
-\usepackage[english]{babel}
-\usepackage{amsmath}
-\usepackage{amssymb}
+\documentclass[preview]{standalone}    ← 缺 standalone.cls
+\usepackage[english]{babel}            ← basictex 自带
+\usepackage{amsmath}                   ← 自带
+\usepackage{amssymb}                   ← 自带
 ```
 
-basictex 自带 babel / amsmath / amssymb，但缺：
+`standalone` 的 `[preview]` 选项又要加载 `preview.sty`，且 manim 只吃 SVG，
+必须经 `dvisvgm` 转——这两个 basictex 都没带。
 
-| 缺的 | 干什么用 | 装法 |
-|---|---|---|
-| `standalone.cls` | 裁剪页面到公式墨迹大小 | `sudo tlmgr install standalone` |
-| `dvisvgm` | 把 LaTeX 的 DVI 输出转成 SVG（manim 只吃 SVG） | `sudo tlmgr install dvisvgm` |
+| 缺的 | 干什么用 |
+|---|---|
+| `standalone.cls` | 裁剪页面到公式墨迹大小 |
+| `preview.sty` | standalone 的 `[preview]` 选项依赖它（**容易漏**） |
+| `dvisvgm` | 把 LaTeX 的 DVI 转成 SVG（manim 只吃 SVG） |
 
-一条命令补齐：
+**正规补法**（要 sudo，agent 无法非交互跑，必须用户在真实终端执行）：
 
 ```bash
-sudo tlmgr install standalone dvisvgm
+sudo tlmgr update --self          # basictex 自带的 tlmgr 版本旧，不更新会被拒绝
+sudo tlmgr install standalone dvisvgm preview
 ```
 
-> `sudo` 会弹窗要密码，**agent 无法非交互执行**，必须用户在真实终端跑。
-> 这也是 `brew install --cask basictex` 本身要手动跑的原因（pkg 安装器要 sudo）。
+> tlmgr 会要求先 `update --self`，否则直接 `Terminating`。这是 basictex 的常见坑。
 
-### 完整 LaTeX 安装清单（新机器照抄）
+**免 sudo 的手工补法**（本机采用的方案，用户无密码时可走这条）：
 
 ```bash
-# 1. basictex（要 sudo，弹窗输密码）
+# 1. 从 CTAN 镜像直接下 tlnet 的 .tar.xz（免 tlmgr 版本检查）
+M=https://mirrors.sjtug.sjtu.edu.cn/ctan/systems/texlive/tlnet/archive
+for p in standalone preview; do
+  curl -sLO "$M/$p.tar.xz" && mkdir -p "x_$p" && tar xJf "$p.tar.xz" -C "x_$p"
+done
+# 2. dvisvgm 的元数据包只有 880 字节，真二进制在平台包里；basictex 是 universal
+curl -sLO "$M/dvisvgm.universal-darwin.tar.xz" && mkdir -p x_dv && tar xJf dvisvgm.universal-darwin.tar.xz -C x_dv
+# 3. 宏包放进用户态 extra，二进制放进 ~/.local/bin
+mkdir -p ~/.local/texlive-extra/tex ~/.local/bin
+cp -R x_standalone/tex/* x_preview/tex/* ~/.local/texlive-extra/tex/
+cp x_dv/bin/universal-darwin/dvisvgm ~/.local/bin/ && chmod +x ~/.local/bin/dvisvgm
+```
+
+> ⚠ **别把宏包放进 `~/Library/texmf` 或 `~/texmf`**：basictex 的 `texmf.cnf` 里
+> `TEXMFHOME = ./Library/texmf`（相对路径，cwd 一变就失效），且 kpathsea 的
+> ls-R 索引在 basictex 上刷不成功。用 `TEXINPUTS` 指到 extra 目录最可靠。
+
+### 🔴🔴 最关键的坑：TEXMFROOT + TEXMFCNF 必须显式设（2026-10-24 实测）
+
+只设 `TEXINPUTS` 时，`latex` 能找到宏包、DVI 也能生成，但 **dvisvgm 会失败**：
+
+```text
+warning: kpathsea: configuration file texmf.cnf not found in these directories: ...
+```
+
+`TEXINPUTS` 污染了 kpathsea 的搜索起点，dvisvgm 以为自己的 prefix 变了，
+于是找不到 `texmf.cnf` → 字体 map 加载失败 → **SVG 里的 glyph 引用全部悬空**
+（`use=5 defs=0`）→ 公式字符一个都不显示，画面看起来「全黑」。
+
+**解法**：把根目录与配置目录钉死，两个程序才都正常。已固化在
+`backends/manim/scripts/env.sh`：
+
+```bash
+export TEXMFROOT=/usr/local/texlive/2026basic
+export TEXMFCNF=/usr/local/texlive/2026basic/texmf-dist/web2c
+export TEXINPUTS="$HOME/.local/texlive-extra/tex//:"
+```
+
+修好的判据（一眼看出是否正常）：
+
+```bash
+F=$(ls media/tex/*.svg | head -1)
+echo "use=$(rg -o "xlink:href='#" $F | wc -l) defs=$(rg -o "id='g" $F | wc -l)"
+# 正常：use=5 defs=5（引用数与定义数相等）
+# 异常：use=5 defs=0（字体没嵌入，公式不可见）
+```
+
+### ⚠ manim 0.22 的画幅：-q 标志覆盖 manim.cfg
+
+`manim.cfg` 里写 `pixel_width = 1280` **不生效**——0.22 的 quality 机制
+（默认 `high_quality` = 1920×1080@60fps）优先级更高。
+
+所以画幅的权威来源是**命令行的 `-qm`**（= 1280×720@30fps，正好与 remotion
+后端对齐），`manim.cfg` 里只留 `background_color`。所有脚本已统一用 `-qm`。
+
+### ⚠ manim 0.22 没有「按帧号出静图」
+
+`-t` 是 `--transparent`（透明背景），不是动画进度。要静图用：
+
+```bash
+manim render -s --format=png -qm scenes/DP01.py DP01
+```
+
+`-s` 会 fast-forward 所有动画存最后一帧。要中间态只能改场景动画时长，
+或先渲片段再 ffmpeg 抽帧。
+
+### 🔴 字体必须装（否则文字全不可见）
+
+manim 用 Pango 找字体，缺字体会让 `Text()` 渲染成空白：
+
+```text
+WARNING  Font Fira Code not in [...]
+```
+
+```bash
+brew install --cask font-fira-code font-noto-sans-sc   # 无需 sudo
+```
+
+### 完整安装清单（新机器照抄）
+
+```bash
+# 1. cairo/pango（pycairo 编译必需，无需 sudo）
+brew install pkg-config cairo pango
+
+# 2. 中英文字体（无需 sudo）
+brew install --cask font-fira-code font-noto-sans-sc
+
+# 3. basictex（要 sudo，弹窗输密码）
 brew install --cask basictex
 
-# 2. 补 manim 需要的包（要 sudo）
-sudo tlmgr install standalone dvisvgm
+# 4. 补 standalone / preview / dvisvgm
+#    有 sudo 密码：sudo tlmgr update --self && sudo tlmgr install standalone dvisvgm preview
+#    无密码：用上面「免 sudo 的手工补法」
 
-# 3. 把 texlive 加进 PATH（basictex 装在 /usr/local/texlive/2026basic）
-echo 'export PATH="/usr/local/texlive/2026basic/bin/universal-darwin:$PATH"' >> ~/.zshrc
+# 5. PATH 固化
+echo 'export PATH="/usr/local/texlive/2026basic/bin/universal-darwin:$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
-# 4. 验证
+# 6. 验证（use 与 defs 应相等）
 kpsewhich standalone.cls && which dvisvgm && which latex
 ```
 
