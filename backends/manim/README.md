@@ -388,7 +388,12 @@ VER=v1 scripts/render.sh
 
 ### V1 明确遗留
 
-- **样片**：只验证最小闭环，完整质量标尺样片（对标 remotion 的 `examples/rag/`）留 V2
-- **basictex 安装**：本机未装，`MathTex` 路径未在真实 LaTeX 环境验证过
-- **`agent-build-rules.md` / `agent-qc-rules.md`**：V1 只有分镜格式，多 agent 构建协议留 V2
+- ~~**样片**：只验证最小闭环~~ → **V2 已完成**：《梯度下降的公式》12 推导步 /
+  112.6s / 3379 帧，见 `examples/gradient-descent/`，QC 判据已校准
+  （见 `reference/qc-criteria.md`）
+- ~~**basictex 安装**：本机未装~~ → **已装并验证**：`MathTex` 真公式渲染通过
+- **`agent-build-rules.md` / `agent-qc-rules.md`**：V2 只有分镜格式 + QC 判据文档，
+  多 agent 并行构建协议留 V3
 - **`selfcheck.py`**：remotion 特定，manim 端未做对应静态自检
+- **覆盖层**（片头章节卡 / HUD / 进度条 / 片尾）：manim 端未实现，
+  样片片头 45 帧是黑屏 + 字幕。与 remotion 后端的明显差距，留 V3

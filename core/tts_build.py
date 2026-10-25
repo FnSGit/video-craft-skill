@@ -47,7 +47,11 @@ def _resolve_root(argv):
 
 
 ROOT, _argv = _resolve_root(sys.argv)
-sys.argv = [sys.argv[0]] + _argv
+# ⚠ _resolve_root 返回的 _argv 已包含 argv[0]（它只剥离 --root 及其值），
+# 这里直接替换，不能再拼一次 sys.argv[0]——否则 argv[0] 重复，
+# 导致 main() 把脚本自身路径当成 narration.txt（表现为 lang 误判 en、
+# 解析出几百句代码行）。
+sys.argv = _argv
 REM = ROOT
 
 # slug / lang：优先项目根的 config.json（后端无关，manim 等用）；

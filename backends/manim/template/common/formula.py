@@ -79,26 +79,50 @@ class Formula(VGroup):
         return len(self.mob)
 
     def highlight(self, start: int, end: int, color=None):
-        """高亮 [start, end) 个字符/子式。end 为 None 表示到末尾。"""
+        """高亮 [start, end) 个字符/子式。end 为 None 表示到末尾。
+
+        ⚠ text 模式下 self.mob 是单个 Text 对象，没有按字符切分的 submobject，
+        高亮会退化为「整体变色」；latex 模式下才逐字符精确高亮。
+        """
         color = color or style.PURPLE
         end = len(self.mob) if end is None else end
-        for i in range(start, min(end, len(self.mob))):
-            self.mob[i].set_color(color)
+        subs = getattr(self.mob, "submobjects", None)
+        if not subs:
+            # text 模式：没有子结构可逐段高亮，整体变色
+            self.mob.set_color(color)
+            return self
+        for i in range(start, min(end, len(subs))):
+            subs[i].set_color(color)
         return self
 
     def box_around(self, start: int, end: int):
-        """给 [start, end) 个子式加框（SurroundingRectangle），返回框本身。"""
+        """给 [start, end) 个子式加框（SurroundingRectangle），返回框本身。
+
+        ⚠ text 模式下 self.mob 没有子结构，box_around 退化为框住整个公式。
+        """
         from manim import SurroundingRectangle
 
         end = len(self.mob) if end is None else end
-        grp = VGroup(*[self.mob[i] for i in range(start, min(end, len(self.mob)))])
+        subs = getattr(self.mob, "submobjects", None)
+        if not subs:
+            return SurroundingRectangle(self.mob, color=style.PURPLE, buff=0.12)
+        n = len(subs)
+        start = max(0, min(start, n - 1))
+        end = max(start + 1, min(end, n))
+        grp = VGroup(*[subs[i] for i in range(start, end)])
         return SurroundingRectangle(grp, color=style.PURPLE, buff=0.12)
 
     def underline(self, start: int, end: int):
         from manim import Underline
 
         end = len(self.mob) if end is None else end
-        grp = VGroup(*[self.mob[i] for i in range(start, min(end, len(self.mob)))])
+        subs = getattr(self.mob, "submobjects", None)
+        if not subs:
+            return Underline(self.mob, color=style.PURPLE)
+        n = len(subs)
+        start = max(0, min(start, n - 1))
+        end = max(start + 1, min(end, n))
+        grp = VGroup(*[subs[i] for i in range(start, end)])
         return Underline(grp, color=style.PURPLE)
 
 
@@ -159,3 +183,17 @@ def _ascii_fold(tex: str) -> str:
 def formula(tex: str, **kw) -> Formula:
     """快捷构造。"""
     return Formula(tex, **kw)
+
+
+def plain(text: str, **kw):
+    """中文/纯文本标注——**不要走 LaTeX**。
+
+    LaTeX 的 \\text{} 不支持 Unicode 中文（报 `Unicode character 步 (U+6B65)`），
+    需要 ctex/xeCJK 那一套。推导片里的中文说明一律用这个工厂走 Text()。
+
+    用法：
+        note = plain("减号：往下走")
+    """
+    from manim import Text
+
+    return Text(text, font_size=kw.pop("font_size", style.FONT_SMALL), font=style.FONT_CN, **kw)

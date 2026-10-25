@@ -81,6 +81,17 @@ class TimedScene(Scene):
             # 每帧刷新字幕
             self.add_updater(self._update_subtitle)
 
+    def render(self, preview: bool = False) -> bool:
+        """包一层 render：construct 结束后自动核对帧预算。
+
+        为什么自动：手写 check_frame_budget() 调用一定会忘（V2 样片实测：
+        12 个场景全部没调，导致每个场景帧数比声明区间少 56–463 帧，
+        成片 1585 帧 vs 预期 3962 帧，字幕与画面整体错位）。
+        """
+        ok = super().render(preview)
+        self.check_frame_budget()
+        return ok
+
     def _update_subtitle(self, dt):
         """每帧调用。注意 scene 级 updater 签名是 func(dt) 单参数
         （mobject 级才是 func(mob, dt)）——用错会 TypeError。
@@ -90,8 +101,11 @@ class TimedScene(Scene):
         """
         if self.track is None:
             return
+        from manim import config
+
+        fps = config.frame_rate or style.FPS
         # self.time 是场景内已播放秒数；加上 frame_offset 得到全片绝对帧号
-        self.frame = int(self.time * style.FPS + 0.5) + 1 + self.frame_offset
+        self.frame = int(self.time * fps + 0.5) + 1 + self.frame_offset
         cur = self.track.mob_at(self.frame)
         if cur is not self._sub_mob:
             if self._sub_mob is not None and self._sub_mob in self.mobjects:
@@ -123,21 +137,44 @@ class TimedScene(Scene):
             )
 
     def _frames_to_run_time(self, frames: float) -> float:
-        return frames / style.FPS
+        """帧数 → manim 的 run_time（秒）。
 
-    def show(self, *mobjects, frames: int = 30, **kw):
+        ⚠ 必须读 manim 的实际 config.frame_rate，不能用硬编码 30：
+        -ql 是 15fps、-qm 是 30fps、-qh 是 60fps。硬编码 30 时，
+        在 -ql 下 frames=70 会被算成 70/30=2.33s=35 帧（15fps），
+        导致测渲与正式渲染的帧数不一致（V2 样片实测：DP01 在 -ql 下
+        出了 674 帧而非声明的 300 帧）。
+        """
+        from manim import config
+
+        fps = config.frame_rate or style.FPS
+        return frames / fps
+
+    def show(self, *mobjects, frames: int = 30, rate_func=None, **kw):
         """入场：写入场动画并占用 frames 帧。"""
         from manim import FadeIn
 
+        # rate_func 只在非 None 时注入：manim 的 Animation.rate_func 需要 callable，
+        # 显式传 None 会 TypeError（"'NoneType' object is not callable"）。
+        if rate_func is not None:
+            kw["rate_func"] = rate_func
         self.play(*[FadeIn(m, **kw) for m in mobjects], run_time=self._frames_to_run_time(frames))
 
     def hold(self, frames: int):
         """静止停留 frames 帧——推导片的核心节奏：让观众看清当前式子。"""
         self.wait(self._frames_to_run_time(frames))
 
-    def play_for(self, *animations, frames: int):
-        """指定帧数的 play。"""
-        self.play(*animations, run_time=self._frames_to_run_time(frames))
+    def play_for(self, *animations, frames: int, rate_func=None):
+        """指定帧数的 play。
+
+        rate_func 透传给 manim（如 lambda t: t*0.12 表示只走 12% 路程），
+        用来做「学习率太小只挪一点点」这类演示。None 时不给 manim 传
+        （manim 的 rate_func 默认是 smooth，传 None 会 TypeError）。
+        """
+        if rate_func is None:
+            self.play(*animations, run_time=self._frames_to_run_time(frames))
+        else:
+            self.play(*animations, run_time=self._frames_to_run_time(frames), rate_func=rate_func)
 
     def total_frames(self) -> int:
         if self.track is not None:

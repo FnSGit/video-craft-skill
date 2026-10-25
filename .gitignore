@@ -12,3 +12,9 @@ audio/cache/
 script/timeline.json
 script/audio.wav
 分镜表.md
+
+# 样片产物（成片与逐帧体积大，不入库）
+backends/*/examples/*/renders/
+backends/*/examples/*/fin_frames/
+backends/*/examples/*/media/
+backends/*/examples/*/script/audio.wav
